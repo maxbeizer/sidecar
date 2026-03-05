@@ -19,6 +19,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/marcus/sidecar/internal/features"
+	"github.com/marcus/sidecar/internal/projectdir"
 )
 
 var openCodeRunPrefixRe = regexp.MustCompile(`^(\S+)\s+run(\s+.*)?$`)
@@ -372,6 +373,9 @@ func (p *Plugin) StartAgent(wt *Worktree, agentType AgentType) tea.Cmd {
 			return AgentStartedMsg{Epoch: epoch, Err: fmt.Errorf("create session: %w", err)}
 		}
 
+		// Ensure server persists when all sessions are killed
+		ensureTmuxServerConfig()
+
 		// Set history limit for scrollback capture
 		_ = exec.Command("tmux", "set-option", "-t", sessionName, "history-limit",
 			strconv.Itoa(tmuxHistoryLimit)).Run()
@@ -573,7 +577,11 @@ func (p *Plugin) buildAgentCommand(agentType AgentType, wt *Worktree, skipPerms 
 // Returns the command to execute the launcher. This avoids shell escaping issues
 // with complex markdown content (backticks, newlines, quotes, etc).
 func (p *Plugin) writeAgentLauncher(worktreePath string, agentType AgentType, baseCmd, prompt string) (string, error) {
-	launcherFile := filepath.Join(worktreePath, ".sidecar-start.sh")
+	wtDir, err := projectdir.WorktreeDir(p.ctx.ProjectRoot, worktreePath)
+	if err != nil {
+		return "", fmt.Errorf("resolve worktree dir: %w", err)
+	}
+	launcherFile := filepath.Join(wtDir, "start.sh")
 
 	// Build shell profile sourcing command.
 	// This ensures tools like claude (installed via nvm) are in PATH.
@@ -611,6 +619,15 @@ rm -f %q
 %s
 SIDECAR_PROMPT_EOF
 )"
+rm -f %q
+`, shellSetup, baseCmd, prompt, launcherFile)
+	case AgentAmp:
+		// amp requires piping via stdin, does not accept positional args
+		script = fmt.Sprintf(`#!/bin/bash
+%s
+cat <<'SIDECAR_PROMPT_EOF' | %s
+%s
+SIDECAR_PROMPT_EOF
 rm -f %q
 `, shellSetup, baseCmd, prompt, launcherFile)
 	default:
@@ -671,6 +688,9 @@ func (p *Plugin) StartAgentWithOptions(wt *Worktree, agentType AgentType, skipPe
 		if err := cmd.Run(); err != nil {
 			return AgentStartedMsg{Epoch: epoch, Err: fmt.Errorf("create session: %w", err)}
 		}
+
+		// Ensure server persists when all sessions are killed
+		ensureTmuxServerConfig()
 
 		// Set history limit for scrollback capture
 		_ = exec.Command("tmux", "set-option", "-t", sessionName, "history-limit",
@@ -739,6 +759,9 @@ func (p *Plugin) AttachToWorktreeDir(wt *Worktree) tea.Cmd {
 				return TmuxAttachFinishedMsg{WorkspaceName: wt.Name, Err: fmt.Errorf("create session: %w", err)}
 			}
 		}
+
+		// Ensure server persists when all sessions are killed
+		ensureTmuxServerConfig()
 
 		// Track as managed session
 		p.managedSessions[sessionName] = true
@@ -1476,9 +1499,9 @@ func (p *Plugin) detectOrphanedWorktrees() {
 		// Skip main worktree - can't attach agents to it anyway
 		if wt.IsMain {
 			wt.IsOrphaned = false
-			// Clean up any stale .sidecar-agent file from main worktree
+			// Clean up any stale agent file from main worktree
 			if wt.ChosenAgentType != "" && wt.ChosenAgentType != AgentNone {
-				_ = os.Remove(filepath.Join(wt.Path, sidecarAgentFile))
+				_ = saveAgentType(p.ctx.ProjectRoot, wt.Path, AgentNone)
 				wt.ChosenAgentType = ""
 			}
 			continue

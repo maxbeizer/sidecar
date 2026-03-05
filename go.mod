@@ -14,10 +14,11 @@ require (
 	github.com/charmbracelet/x/ansi v0.11.3
 	github.com/charmbracelet/x/cellbuf v0.0.14
 	github.com/fsnotify/fsnotify v1.9.0
-	github.com/marcus/td v0.38.0
+	github.com/marcus/td v0.41.0
 	github.com/mattn/go-runewidth v0.0.19
 	github.com/mattn/go-sqlite3 v1.14.33
 	golang.org/x/term v0.39.0
+	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.41.0
 )
 

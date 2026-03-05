@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/marcus/sidecar/internal/config"
 	"github.com/marcus/sidecar/internal/plugin"
+	"github.com/marcus/sidecar/internal/projectdir"
 )
 
 func TestSanitizeName(t *testing.T) {
@@ -142,6 +144,7 @@ func TestGetAgentCommand(t *testing.T) {
 		{AgentCursor, "cursor-agent"},
 		{AgentOpenCode, "opencode"},
 		{AgentPi, "pi"},
+		{AgentAmp, "amp"},
 		{AgentCustom, "claude"}, // Falls back to claude
 	}
 
@@ -667,6 +670,7 @@ func TestShouldShowSkipPermissions(t *testing.T) {
 		{AgentCursor, true},    // Has -f flag
 		{AgentOpenCode, false}, // No known flag
 		{AgentPi, false},       // No known flag
+		{AgentAmp, true},       // Has --dangerously-allow-all
 	}
 
 	p := &Plugin{}
@@ -775,6 +779,23 @@ func TestBuildAgentCommand(t *testing.T) {
 			wantFlag:   "",
 			wantPrompt: false,
 		},
+		// Amp tests
+		{
+			name:       "amp no skip no task",
+			agentType:  AgentAmp,
+			skipPerms:  false,
+			taskID:     "",
+			wantFlag:   "",
+			wantPrompt: false,
+		},
+		{
+			name:       "amp with skip no task",
+			agentType:  AgentAmp,
+			skipPerms:  true,
+			taskID:     "",
+			wantFlag:   "--dangerously-allow-all",
+			wantPrompt: false,
+		},
 		// Aider tests
 		{
 			name:       "aider no skip no task",
@@ -844,6 +865,8 @@ func TestBuildAgentCommandSyntax(t *testing.T) {
 		{AgentOpenCode, true, "opencode"}, // No skip flag
 		{AgentPi, false, "pi"},
 		{AgentPi, true, "pi"}, // No skip flag
+		{AgentAmp, false, "amp"},
+		{AgentAmp, true, "amp --dangerously-allow-all"},
 		{AgentAider, false, "aider"},
 		{AgentAider, true, "aider --yes"},
 	}
@@ -1051,8 +1074,33 @@ func TestRecordUnchangedPollResetInterruptedByChange(t *testing.T) {
 func TestWriteAgentLauncher(t *testing.T) {
 	// Test that launcher scripts are created correctly for complex prompts
 	tmpDir := t.TempDir()
+	projectRoot := filepath.Join(tmpDir, "project")
+	worktreePath := filepath.Join(tmpDir, "worktree")
+	if err := os.MkdirAll(projectRoot, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(worktreePath, 0755); err != nil {
+		t.Fatal(err)
+	}
 
-	p := &Plugin{}
+	// Set up state dir so projectdir resolves to our temp dir
+	stateDir := filepath.Join(tmpDir, "state")
+	config.SetTestStateDir(stateDir)
+	t.Cleanup(config.ResetTestStateDir)
+
+	// Resolve worktree dir to get expected path
+	wtDir, err := projectdir.WorktreeDir(projectRoot, worktreePath)
+	if err != nil {
+		t.Fatalf("WorktreeDir failed: %v", err)
+	}
+	expectedLauncherPath := filepath.Join(wtDir, "start.sh")
+
+	p := &Plugin{
+		ctx: &plugin.Context{
+			ProjectRoot: projectRoot,
+			Logger:      slog.Default(),
+		},
+	}
 
 	tests := []struct {
 		name      string
@@ -1066,27 +1114,34 @@ func TestWriteAgentLauncher(t *testing.T) {
 			agentType: AgentClaude,
 			baseCmd:   "claude",
 			prompt:    "Task: fix bug",
-			wantCmd:   "bash '" + tmpDir + "/.sidecar-start.sh'",
+			wantCmd:   "bash '" + expectedLauncherPath + "'",
 		},
 		{
 			name:      "claude with complex markdown",
 			agentType: AgentClaude,
 			baseCmd:   "claude",
 			prompt:    "Task: implement feature\n\n```go\nfunc main() {\n\tfmt.Println(\"hello\")\n}\n```\n\nDon't break the user's code!",
-			wantCmd:   "bash '" + tmpDir + "/.sidecar-start.sh'",
+			wantCmd:   "bash '" + expectedLauncherPath + "'",
 		},
 		{
 			name:      "aider uses --message flag",
 			agentType: AgentAider,
 			baseCmd:   "aider --yes",
 			prompt:    "Task: fix bug",
-			wantCmd:   "bash '" + tmpDir + "/.sidecar-start.sh'",
+			wantCmd:   "bash '" + expectedLauncherPath + "'",
+		},
+		{
+			name:      "amp pipes via stdin",
+			agentType: AgentAmp,
+			baseCmd:   "amp --dangerously-allow-all",
+			prompt:    "Task: fix bug",
+			wantCmd:   "bash '" + expectedLauncherPath + "'",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cmd, err := p.writeAgentLauncher(tmpDir, tt.agentType, tt.baseCmd, tt.prompt)
+			cmd, err := p.writeAgentLauncher(worktreePath, tt.agentType, tt.baseCmd, tt.prompt)
 			if err != nil {
 				t.Fatalf("writeAgentLauncher failed: %v", err)
 			}
@@ -1096,7 +1151,7 @@ func TestWriteAgentLauncher(t *testing.T) {
 			}
 
 			// Verify launcher script exists and is executable
-			launcherInfo, err := os.Stat(tmpDir + "/.sidecar-start.sh")
+			launcherInfo, err := os.Stat(expectedLauncherPath)
 			if err != nil {
 				t.Fatalf("launcher script not created: %v", err)
 			}
@@ -1105,7 +1160,7 @@ func TestWriteAgentLauncher(t *testing.T) {
 			}
 
 			// Verify the script contains the prompt embedded in a heredoc
-			scriptContent, err := os.ReadFile(tmpDir + "/.sidecar-start.sh")
+			scriptContent, err := os.ReadFile(expectedLauncherPath)
 			if err != nil {
 				t.Fatalf("failed to read launcher script: %v", err)
 			}
@@ -1126,8 +1181,15 @@ func TestWriteAgentLauncher(t *testing.T) {
 				t.Error("launcher script should start with #!/bin/bash")
 			}
 
+			// Amp-specific: verify pipe syntax (prompt piped to command via stdin)
+			if tt.agentType == AgentAmp {
+				if !strings.Contains(scriptStr, "SIDECAR_PROMPT_EOF' | "+tt.baseCmd) {
+					t.Errorf("amp script should pipe prompt to command via stdin, got:\n%s", scriptStr)
+				}
+			}
+
 			// Cleanup for next test
-			_ = os.Remove(tmpDir + "/.sidecar-start.sh")
+			_ = os.Remove(expectedLauncherPath)
 		})
 	}
 }

@@ -124,11 +124,13 @@ const (
 	AgentNone     AgentType = ""         // No agent (attach only)
 	AgentClaude   AgentType = "claude"   // Claude Code
 	AgentCodex    AgentType = "codex"    // Codex CLI
+	AgentCopilot  AgentType = "copilot"  // GitHub Copilot CLI
 	AgentAider    AgentType = "aider"    // Aider
 	AgentGemini   AgentType = "gemini"   // Gemini CLI
 	AgentCursor   AgentType = "cursor"   // Cursor Agent
 	AgentOpenCode AgentType = "opencode" // OpenCode
 	AgentPi       AgentType = "pi"       // Pi Agent
+	AgentAmp      AgentType = "amp"      // Amp
 	AgentCustom   AgentType = "custom"   // Custom command
 	AgentShell    AgentType = "shell"    // Project shell (not an AI agent)
 )
@@ -137,11 +139,22 @@ const (
 var SkipPermissionsFlags = map[AgentType]string{
 	AgentClaude:   "--dangerously-skip-permissions",
 	AgentCodex:    "--dangerously-bypass-approvals-and-sandbox",
+	AgentCopilot:  "", // No known flag
 	AgentAider:    "--yes",
 	AgentGemini:   "--yolo",
 	AgentCursor:   "-f",
 	AgentOpenCode: "", // No known flag
 	AgentPi:       "", // No known flag
+	AgentAmp:      "--dangerously-allow-all",
+}
+
+// PrintModeArgs maps agent types to their non-interactive/print mode CLI arguments.
+// Agents with print mode can generate output to stdout without an interactive session.
+// Only agents that support true non-interactive one-shot output are included.
+// Values are passed as arguments to exec.Command after the agent binary name.
+var PrintModeArgs = map[AgentType][]string{
+	AgentClaude: {"-p"},                // claude -p: reads prompt from stdin, prints response to stdout
+	AgentCodex:  {"exec", "-"},         // codex exec -: "-" reads prompt from stdin (convention), prints to stdout
 }
 
 // AgentDisplayNames provides human-readable names for agent types.
@@ -149,10 +162,12 @@ var AgentDisplayNames = map[AgentType]string{
 	AgentNone:     "None (attach only)",
 	AgentClaude:   "Claude Code",
 	AgentCodex:    "Codex CLI",
+	AgentCopilot:  "GitHub Copilot CLI",
 	AgentGemini:   "Gemini CLI",
 	AgentCursor:   "Cursor Agent",
 	AgentOpenCode: "OpenCode",
 	AgentPi:       "Pi Agent",
+	AgentAmp:      "Amp",
 	AgentShell:    "Project Shell",
 }
 
@@ -161,31 +176,37 @@ var AgentDisplayNames = map[AgentType]string{
 var shellAgentAbbreviations = map[AgentType]string{
 	AgentClaude:   "Claude",
 	AgentCodex:    "Codex",
+	AgentCopilot:  "Copilot",
 	AgentGemini:   "Gemini",
 	AgentCursor:   "Cursor",
 	AgentOpenCode: "OpenCode",
 	AgentPi:       "Pi",
+	AgentAmp:      "Amp",
 }
 
 // AgentCommands maps agent types to their CLI commands.
 var AgentCommands = map[AgentType]string{
 	AgentClaude:   "claude",
 	AgentCodex:    "codex",
+	AgentCopilot:  "copilot",
 	AgentAider:    "aider", // Not in UI, but supported for backward compat
 	AgentGemini:   "gemini",
 	AgentCursor:   "cursor-agent",
 	AgentOpenCode: "opencode",
 	AgentPi:       "pi",
+	AgentAmp:      "amp",
 }
 
 // AgentTypeOrder defines the order of agents in selection UI.
 var AgentTypeOrder = []AgentType{
 	AgentClaude,
 	AgentCodex,
+	AgentCopilot,
 	AgentGemini,
 	AgentCursor,
 	AgentOpenCode,
 	AgentPi,
+	AgentAmp,
 	AgentNone,
 }
 
@@ -195,10 +216,12 @@ var ShellAgentOrder = []AgentType{
 	AgentNone,
 	AgentClaude,
 	AgentCodex,
+	AgentCopilot,
 	AgentGemini,
 	AgentCursor,
 	AgentOpenCode,
 	AgentPi,
+	AgentAmp,
 }
 
 // kanbanCardData stores column and row for Kanban card hit regions.

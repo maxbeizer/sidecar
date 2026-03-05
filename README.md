@@ -108,7 +108,7 @@ View staged, modified, and untracked files with a split-pane interface. The side
 
 ### Conversations
 
-Browse session history from multiple AI coding agents with message content, token usage, and search. Supports Amp Code, Claude Code, Codex, Cursor CLI, Gemini CLI, Kiro, OpenCode, Pi Agent, and Warp. [Full documentation →](https://marcus.github.io/sidecar/docs/conversations-plugin)
+Browse session history from multiple AI coding agents with message content, token usage, and search. Supports Amp Code, Claude Code, Codex, Cursor CLI, Gemini CLI, GitHub Copilot CLI, Kiro, OpenCode, Pi Agent, and Warp. [Full documentation →](https://marcus.github.io/sidecar/docs/conversations-plugin)
 
 ![Conversations](docs/screenshots/sidecar-conversations.png)
 
@@ -278,6 +278,7 @@ make fmt-check    # Verify formatting for changed Go files
 make fmt-check-all # Verify formatting across full codebase
 make lint         # Lint new issues only (merge-base with main)
 make lint-all     # Lint entire codebase (includes legacy debt)
+make install-hooks # Install pre-commit hooks (gofmt, go vet, go build)
 ```
 
 ### Go Lint Baseline

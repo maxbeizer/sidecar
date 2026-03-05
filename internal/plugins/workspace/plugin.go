@@ -13,6 +13,7 @@ import (
 	"github.com/marcus/sidecar/internal/modal"
 	"github.com/marcus/sidecar/internal/mouse"
 	"github.com/marcus/sidecar/internal/plugin"
+	"github.com/marcus/sidecar/internal/projectdir"
 	"github.com/marcus/sidecar/internal/plugins/gitstatus"
 	"github.com/marcus/sidecar/internal/state"
 	"github.com/marcus/sidecar/internal/ui"
@@ -75,6 +76,7 @@ const (
 	mergeTargetActionID    = "merge-target-action"
 	mergeCleanUpButtonID   = "merge-cleanup-btn"
 	mergeSkipButtonID      = "merge-skip-btn"
+	mergePRURLID           = "merge-pr-url"
 
 	// Prompt Picker modal regions
 	regionPromptItem   = "prompt-item"
@@ -398,8 +400,13 @@ func (p *Plugin) Init(ctx *plugin.Context) error {
 	p.stateRestored = false
 
 	// Load shell manifest for persistence (td-f88fdd)
-	manifestPath := filepath.Join(ctx.WorkDir, ".sidecar", "shells.json")
-	p.shellManifest, _ = LoadShellManifest(manifestPath)
+	projDir, err := projectdir.Resolve(ctx.ProjectRoot)
+	if err != nil {
+		p.ctx.Logger.Warn("failed to resolve project dir for manifest", "error", err)
+	} else {
+		manifestPath := filepath.Join(projDir, "shells.json")
+		p.shellManifest, _ = LoadShellManifest(manifestPath)
+	}
 
 	// Stop any previous watcher (important for project switching)
 	if p.shellWatcher != nil {
@@ -538,7 +545,7 @@ func (p *Plugin) saveSelectionState() {
 		}
 	}
 
-	// td-f88fdd: Shell display names now persisted in .sidecar/shells.json manifest
+	// td-f88fdd: Shell display names now persisted in shells.json manifest
 	// Only save selection state (which worktree/shell is selected)
 	if wtState.WorkspaceName != "" || wtState.ShellTmuxName != "" {
 		_ = state.SetWorkspaceState(p.ctx.ProjectRoot, wtState)
@@ -733,8 +740,8 @@ func (p *Plugin) getConfigDefaultAgentType() AgentType {
 // resolveWorktreeAgentType returns the agent type to use when starting an agent for a worktree.
 // Hierarchy: .sidecar-agent file -> config defaultAgentType -> Claude fallback.
 func (p *Plugin) resolveWorktreeAgentType(wt *Worktree) AgentType {
-	if wt != nil {
-		fileAgent := loadAgentType(wt.Path)
+	if wt != nil && p != nil && p.ctx != nil {
+		fileAgent := loadAgentType(p.ctx.ProjectRoot, wt.Path)
 		if isKnownAgentType(fileAgent) {
 			return fileAgent
 		}
@@ -746,7 +753,7 @@ func (p *Plugin) resolveWorktreeAgentType(wt *Worktree) AgentType {
 // .sidecar-agent in the current workspace is treated equivalently to config defaultAgentType.
 func (p *Plugin) getDefaultCreateAgentType() AgentType {
 	if p != nil && p.ctx != nil {
-		fileAgent := loadAgentType(p.ctx.WorkDir)
+		fileAgent := loadAgentType(p.ctx.ProjectRoot, p.ctx.WorkDir)
 		if isKnownAgentType(fileAgent) {
 			return fileAgent
 		}
@@ -828,7 +835,7 @@ func (p *Plugin) initCreateModalBase() {
 	// Load prompts from global and project config
 	home, _ := os.UserHomeDir()
 	configDir := filepath.Join(home, ".config", "sidecar")
-	p.createPrompts = LoadPrompts(configDir, p.ctx.WorkDir)
+	p.createPrompts = LoadPrompts(configDir, p.ctx.ProjectRoot)
 	p.createPromptIdx = -1
 	p.promptPicker = nil
 	p.clearPromptPickerModal()

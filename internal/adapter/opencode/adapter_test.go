@@ -1,11 +1,16 @@
 package opencode
 
 import (
+	"database/sql"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/marcus/sidecar/internal/adapter"
+	_ "github.com/mattn/go-sqlite3"
 )
 
 func TestNew(t *testing.T) {
@@ -18,9 +23,6 @@ func TestNew(t *testing.T) {
 	}
 	if a.projectIndex == nil {
 		t.Error("projectIndex should be initialized")
-	}
-	if a.sessionIndex == nil {
-		t.Error("sessionIndex should be initialized")
 	}
 }
 
@@ -53,6 +55,201 @@ func TestCapabilities(t *testing.T) {
 	}
 	if !caps["watch"] {
 		t.Error("expected watch capability")
+	}
+}
+
+func createSQLiteFixture(t *testing.T) (dbPath string, projectPath string, sessionID string) {
+	t.Helper()
+
+	tmpDir := t.TempDir()
+	projectPath = filepath.Join(tmpDir, "repo")
+	if err := os.MkdirAll(projectPath, 0755); err != nil {
+		t.Fatalf("mkdir project: %v", err)
+	}
+	dbPath = filepath.Join(tmpDir, "opencode.db")
+
+	db, err := sql.Open("sqlite3", dbPath)
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	stmts := []string{
+		`CREATE TABLE project (id TEXT PRIMARY KEY, worktree TEXT);`,
+		`CREATE TABLE session (id TEXT PRIMARY KEY, project_id TEXT, parent_id TEXT, title TEXT, time_created INTEGER, time_updated INTEGER);`,
+		`CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT, time_created INTEGER, time_updated INTEGER, data TEXT);`,
+		`CREATE TABLE part (id TEXT PRIMARY KEY, message_id TEXT, session_id TEXT, data TEXT);`,
+	}
+	for _, stmt := range stmts {
+		if _, err := db.Exec(stmt); err != nil {
+			t.Fatalf("create schema: %v", err)
+		}
+	}
+
+	sessionID = "ses_sqlite_main"
+	now := time.Now().UnixMilli()
+	if _, err := db.Exec(`INSERT INTO project(id, worktree) VALUES(?, ?)`, "proj_sql", projectPath); err != nil {
+		t.Fatalf("insert project: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO session(id, project_id, parent_id, title, time_created, time_updated) VALUES(?, ?, ?, ?, ?, ?)`,
+		sessionID, "proj_sql", "", "SQLite Session", now-5000, now-1000); err != nil {
+		t.Fatalf("insert session: %v", err)
+	}
+
+	userData, _ := json.Marshal(map[string]any{
+		"role": "user",
+		"time": map[string]any{"created": now - 5000, "updated": now - 5000},
+		"model": map[string]any{
+			"providerID": "anthropic",
+			"modelID":    "claude-3-5-sonnet",
+		},
+	})
+	assistantData, _ := json.Marshal(map[string]any{
+		"role":       "assistant",
+		"modelID":    "claude-3-5-sonnet",
+		"providerID": "anthropic",
+		"time":       map[string]any{"created": now - 3000, "updated": now - 2000},
+		"tokens": map[string]any{
+			"input":  123,
+			"output": 45,
+			"cache":  map[string]any{"read": 7, "write": 2},
+		},
+	})
+	if _, err := db.Exec(`INSERT INTO message(id, session_id, time_created, time_updated, data) VALUES(?, ?, ?, ?, ?)`,
+		"msg_sql_user", sessionID, now-5000, now-5000, string(userData)); err != nil {
+		t.Fatalf("insert user message: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO message(id, session_id, time_created, time_updated, data) VALUES(?, ?, ?, ?, ?)`,
+		"msg_sql_assistant", sessionID, now-3000, now-2000, string(assistantData)); err != nil {
+		t.Fatalf("insert assistant message: %v", err)
+	}
+
+	partTextUser, _ := json.Marshal(map[string]any{"type": "text", "text": "Hello from sqlite user"})
+	partTextAssistant, _ := json.Marshal(map[string]any{"type": "text", "text": "Hello from sqlite assistant"})
+	partToolAssistant, _ := json.Marshal(map[string]any{
+		"type":   "tool",
+		"callID": "call_sql_1",
+		"tool":   "bash",
+		"state": map[string]any{
+			"status": "completed",
+			"input":  map[string]any{"cmd": "ls -la"},
+			"output": "ok",
+		},
+	})
+	if _, err := db.Exec(`INSERT INTO part(id, message_id, session_id, data) VALUES(?, ?, ?, ?)`,
+		"prt_sql_user", "msg_sql_user", sessionID, string(partTextUser)); err != nil {
+		t.Fatalf("insert user part: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO part(id, message_id, session_id, data) VALUES(?, ?, ?, ?)`,
+		"prt_sql_assistant_text", "msg_sql_assistant", sessionID, string(partTextAssistant)); err != nil {
+		t.Fatalf("insert assistant text part: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO part(id, message_id, session_id, data) VALUES(?, ?, ?, ?)`,
+		"prt_sql_assistant_tool", "msg_sql_assistant", sessionID, string(partToolAssistant)); err != nil {
+		t.Fatalf("insert assistant tool part: %v", err)
+	}
+
+	return dbPath, projectPath, sessionID
+}
+
+func TestSQLiteStorageMode_DetectSessionsMessages(t *testing.T) {
+	dbPath, projectPath, sessionID := createSQLiteFixture(t)
+	a := &Adapter{
+		storageDir:   filepath.Join(t.TempDir(), "storage"),
+		dbPath:       dbPath,
+		projectIndex: make(map[string]*Project),
+		metaCache:    make(map[string]sessionMetaCacheEntry),
+	}
+
+	found, err := a.Detect(projectPath)
+	if err != nil {
+		t.Fatalf("Detect sqlite error: %v", err)
+	}
+	if !found {
+		t.Fatal("expected sqlite project detection to succeed")
+	}
+
+	sessions, err := a.Sessions(projectPath)
+	if err != nil {
+		t.Fatalf("Sessions sqlite error: %v", err)
+	}
+	if len(sessions) != 1 {
+		t.Fatalf("expected 1 sqlite session, got %d", len(sessions))
+	}
+	if sessions[0].ID != sessionID {
+		t.Fatalf("session id = %q, want %q", sessions[0].ID, sessionID)
+	}
+	if sessions[0].Path != "" {
+		t.Fatalf("sqlite-backed session Path = %q, want empty", sessions[0].Path)
+	}
+
+	messages, err := a.Messages(sessionID)
+	if err != nil {
+		t.Fatalf("Messages sqlite error: %v", err)
+	}
+	if len(messages) != 2 {
+		t.Fatalf("expected 2 sqlite messages, got %d", len(messages))
+	}
+	if messages[0].Role != "user" || messages[1].Role != "assistant" {
+		t.Fatalf("unexpected roles: %q, %q", messages[0].Role, messages[1].Role)
+	}
+	if len(messages[1].ToolUses) == 0 {
+		t.Fatal("expected assistant tool uses from sqlite parts")
+	}
+	if messages[1].InputTokens != 123 || messages[1].OutputTokens != 45 {
+		t.Fatalf("unexpected sqlite tokens: in=%d out=%d", messages[1].InputTokens, messages[1].OutputTokens)
+	}
+}
+
+func TestWatchScope_WithSQLiteDB(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "opencode.db")
+
+	// Without DB file: should be project scope.
+	aNoDB := &Adapter{dbPath: dbPath}
+	if got := aNoDB.WatchScope(); got != adapter.WatchScopeProject {
+		t.Fatalf("WatchScope before db exists = %v, want %v", got, adapter.WatchScopeProject)
+	}
+
+	// Create DB file, then build a fresh adapter: useSQLite is cached at first call.
+	if err := os.WriteFile(dbPath, []byte("sqlite"), 0644); err != nil {
+		t.Fatalf("write db file: %v", err)
+	}
+	aWithDB := &Adapter{dbPath: dbPath}
+	if got := aWithDB.WatchScope(); got != adapter.WatchScopeGlobal {
+		t.Fatalf("WatchScope after db exists = %v, want %v", got, adapter.WatchScopeGlobal)
+	}
+}
+
+func TestWatch_WithSQLiteDB(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "opencode.db")
+	if err := os.WriteFile(dbPath, []byte("sqlite"), 0644); err != nil {
+		t.Fatalf("write db file: %v", err)
+	}
+
+	a := &Adapter{
+		dbPath:       dbPath,
+		projectIndex: make(map[string]*Project),
+		metaCache:    make(map[string]sessionMetaCacheEntry),
+	}
+	ch, closer, err := a.Watch(t.TempDir())
+	if err != nil {
+		t.Fatalf("Watch sqlite error: %v", err)
+	}
+	defer func() { _ = closer.Close() }()
+
+	if err := os.WriteFile(dbPath+"-wal", []byte("wal-update"), 0644); err != nil {
+		t.Fatalf("write wal file: %v", err)
+	}
+
+	select {
+	case evt := <-ch:
+		if evt.Type != adapter.EventSessionCreated && evt.Type != adapter.EventSessionUpdated {
+			t.Fatalf("unexpected event type: %v", evt.Type)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("expected sqlite watcher event")
 	}
 }
 
@@ -120,6 +317,168 @@ func TestDetect_SkipsGlobal(t *testing.T) {
 	}
 	if found {
 		t.Error("should not detect global project (worktree=/)")
+	}
+}
+
+func TestFindProjectID_WithSandboxPaths(t *testing.T) {
+	tmpDir := t.TempDir()
+	projectDir := filepath.Join(tmpDir, "project")
+	if err := os.MkdirAll(projectDir, 0755); err != nil {
+		t.Fatalf("failed to create project dir: %v", err)
+	}
+
+	// Create a project with sandboxes
+	worktreePath := filepath.Join(tmpDir, "repos", "core.zdaj.app")
+	sandboxPath := filepath.Join(worktreePath, "main")
+
+	projectJSON := fmt.Sprintf(`{
+  "id": "test_project_sandbox",
+  "worktree": "%s",
+  "vcs": "git",
+  "sandboxes": ["%s"],
+  "time": { "created": 1767000000000, "updated": 1767100000000 }
+}`, worktreePath, sandboxPath)
+
+	if err := os.WriteFile(filepath.Join(projectDir, "test_sandbox.json"), []byte(projectJSON), 0644); err != nil {
+		t.Fatalf("failed to write project file: %v", err)
+	}
+
+	a := &Adapter{
+		storageDir:   tmpDir,
+		projectIndex: make(map[string]*Project),
+		metaCache:    make(map[string]sessionMetaCacheEntry),
+	}
+
+	// Test 1: Find project by worktree path
+	projectID, err := a.findProjectID(worktreePath)
+	if err != nil {
+		t.Fatalf("findProjectID error: %v", err)
+	}
+	if projectID != "test_project_sandbox" {
+		t.Errorf("expected project ID %q, got %q", "test_project_sandbox", projectID)
+	}
+
+	// Test 2: Find project by sandbox path
+	projectID, err = a.findProjectID(sandboxPath)
+	if err != nil {
+		t.Fatalf("findProjectID error for sandbox: %v", err)
+	}
+	if projectID != "test_project_sandbox" {
+		t.Errorf("expected project ID %q for sandbox path, got %q", "test_project_sandbox", projectID)
+	}
+
+	// Test 3: Path not in sandboxes should not be found
+	unrelatedPath := filepath.Join(tmpDir, "repos", "other-repo")
+	projectID, err = a.findProjectID(unrelatedPath)
+	if err != nil {
+		t.Fatalf("findProjectID error: %v", err)
+	}
+	if projectID != "" {
+		t.Errorf("expected empty project ID for unrelated path, got %q", projectID)
+	}
+}
+
+
+func TestFindProjectID_SubdirectoryMatch(t *testing.T) {
+	tmpDir := t.TempDir()
+	projectDir := filepath.Join(tmpDir, "project")
+	if err := os.MkdirAll(projectDir, 0755); err != nil {
+		t.Fatalf("failed to create project dir: %v", err)
+	}
+
+	// Simulate bare-repo layout: OpenCode registers /repo as worktree,
+	// but sidecar's ProjectRoot resolves to /repo/.bare (the main worktree).
+	worktreePath := filepath.Join(tmpDir, "repos", "core.zdaj.app")
+	barePath := filepath.Join(worktreePath, ".bare")
+	sandboxPath := filepath.Join(worktreePath, "main")
+
+	projectJSON := fmt.Sprintf(`{
+  "id": "test_project_subdir",
+  "worktree": "%s",
+  "vcs": "git",
+  "sandboxes": ["%s"],
+  "time": { "created": 1767000000000, "updated": 1767100000000 }
+}`, worktreePath, sandboxPath)
+
+	if err := os.WriteFile(filepath.Join(projectDir, "test_subdir.json"), []byte(projectJSON), 0644); err != nil {
+		t.Fatalf("failed to write project file: %v", err)
+	}
+
+	a := &Adapter{
+		storageDir:   tmpDir,
+		projectIndex: make(map[string]*Project),
+		metaCache:    make(map[string]sessionMetaCacheEntry),
+	}
+
+	// Test 1: .bare subdirectory should match via subdirectory fallback
+	projectID, err := a.findProjectID(barePath)
+	if err != nil {
+		t.Fatalf("findProjectID error for .bare path: %v", err)
+	}
+	if projectID != "test_project_subdir" {
+		t.Errorf("expected project ID %q for .bare subdirectory, got %q", "test_project_subdir", projectID)
+	}
+
+	// Test 2: Nested subdirectory should also match
+	nestedPath := filepath.Join(worktreePath, ".bare", "worktrees", "main")
+	projectID, err = a.findProjectID(nestedPath)
+	if err != nil {
+		t.Fatalf("findProjectID error for nested path: %v", err)
+	}
+	if projectID != "test_project_subdir" {
+		t.Errorf("expected project ID %q for nested subdirectory, got %q", "test_project_subdir", projectID)
+	}
+
+	// Test 3: Sibling directory should NOT match (prefix attack prevention)
+	siblingPath := filepath.Join(tmpDir, "repos", "core.zdaj.app-other")
+	projectID, err = a.findProjectID(siblingPath)
+	if err != nil {
+		t.Fatalf("findProjectID error for sibling path: %v", err)
+	}
+	if projectID != "" {
+		t.Errorf("expected empty project ID for sibling path, got %q", projectID)
+	}
+}
+func TestFindProjectID_SandboxNotDuplicated(t *testing.T) {
+	tmpDir := t.TempDir()
+	projectDir := filepath.Join(tmpDir, "project")
+	if err := os.MkdirAll(projectDir, 0755); err != nil {
+		t.Fatalf("failed to create project dir: %v", err)
+	}
+
+	// Create a project where sandbox path equals worktree path (should not duplicate)
+	worktreePath := filepath.Join(tmpDir, "repos", "myrepo")
+
+	projectJSON := fmt.Sprintf(`{
+  "id": "test_project_no_dup",
+  "worktree": "%s",
+  "vcs": "git",
+  "sandboxes": ["%s"],
+  "time": { "created": 1767000000000, "updated": 1767100000000 }
+}`, worktreePath, worktreePath)
+
+	if err := os.WriteFile(filepath.Join(projectDir, "test_no_dup.json"), []byte(projectJSON), 0644); err != nil {
+		t.Fatalf("failed to write project file: %v", err)
+	}
+
+	a := &Adapter{
+		storageDir:   tmpDir,
+		projectIndex: make(map[string]*Project),
+		metaCache:    make(map[string]sessionMetaCacheEntry),
+	}
+
+	// Should find project by worktree path
+	projectID, err := a.findProjectID(worktreePath)
+	if err != nil {
+		t.Fatalf("findProjectID error: %v", err)
+	}
+	if projectID != "test_project_no_dup" {
+		t.Errorf("expected project ID %q, got %q", "test_project_no_dup", projectID)
+	}
+
+	// Verify projectIndex has only one entry for this path (no duplication)
+	if len(a.projectIndex) != 1 {
+		t.Errorf("expected 1 entry in projectIndex, got %d", len(a.projectIndex))
 	}
 }
 
@@ -398,7 +757,6 @@ func newTestAdapter(t *testing.T) *Adapter {
 	return &Adapter{
 		storageDir:   testdataDir,
 		projectIndex: make(map[string]*Project),
-		sessionIndex: make(map[string]string),
 		metaCache:    make(map[string]sessionMetaCacheEntry),
 	}
 }
@@ -524,7 +882,6 @@ func TestDiscoverRelatedProjectDirs(t *testing.T) {
 	a := &Adapter{
 		storageDir:   tmpDir,
 		projectIndex: make(map[string]*Project),
-		sessionIndex: make(map[string]string),
 		metaCache:    make(map[string]sessionMetaCacheEntry),
 	}
 
@@ -552,7 +909,6 @@ func TestDiscoverRelatedProjectDirs_EmptyStorage(t *testing.T) {
 	a := &Adapter{
 		storageDir:   tmpDir,
 		projectIndex: make(map[string]*Project),
-		sessionIndex: make(map[string]string),
 		metaCache:    make(map[string]sessionMetaCacheEntry),
 	}
 
@@ -585,7 +941,6 @@ func TestMalformedProjectJSON(t *testing.T) {
 	a := &Adapter{
 		storageDir:   tmpDir,
 		projectIndex: make(map[string]*Project),
-		sessionIndex: make(map[string]string),
 		metaCache:    make(map[string]sessionMetaCacheEntry),
 	}
 
@@ -641,7 +996,6 @@ func TestMalformedSessionJSON(t *testing.T) {
 	a := &Adapter{
 		storageDir:   filepath.Join(tmpDir, "storage"),
 		projectIndex: make(map[string]*Project),
-		sessionIndex: make(map[string]string),
 		metaCache:    make(map[string]sessionMetaCacheEntry),
 	}
 
@@ -684,7 +1038,6 @@ func TestMalformedMessageJSON(t *testing.T) {
 	a := &Adapter{
 		storageDir:   tmpDir,
 		projectIndex: make(map[string]*Project),
-		sessionIndex: make(map[string]string),
 		metaCache:    make(map[string]sessionMetaCacheEntry),
 	}
 

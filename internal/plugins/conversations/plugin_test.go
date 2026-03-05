@@ -398,8 +398,8 @@ func TestDiagnosticsWatcherOn(t *testing.T) {
 		t.Fatalf("expected 2 diagnostics, got %d", len(diags))
 	}
 
-	if diags[1].Status != "on" {
-		t.Errorf("expected watcher status 'on', got %q", diags[1].Status)
+	if diags[1].Status != "ok" {
+		t.Errorf("expected watcher status 'ok', got %q", diags[1].Status)
 	}
 }
 
@@ -3070,6 +3070,11 @@ func TestResumeCommand(t *testing.T) {
 			name:     "cursor-cli adapter",
 			session:  &adapter.Session{ID: "ses_abc123", AdapterID: "cursor-cli"},
 			expected: "cursor-agent --resume ses_abc123",
+		},
+		{
+			name:     "amp adapter",
+			session:  &adapter.Session{ID: "T-a38f981d-52da-47b1-818c-fbaa9ab56e0c", AdapterID: "amp"},
+			expected: "amp threads continue T-a38f981d-52da-47b1-818c-fbaa9ab56e0c",
 		},
 		{
 			name:     "unknown adapter",
