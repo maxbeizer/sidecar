@@ -1252,7 +1252,7 @@ func (p *Plugin) advanceMergeStep() tea.Cmd {
 		p.mergeState.StepStatus[MergeStepCreatePR] = "running"
 		title := p.mergeState.PRTitle
 		if title == "" {
-			title = p.mergeState.Worktree.Branch
+			title, _ = buildFallbackPRDescription(p.mergeState.Worktree.Branch, "", "")
 		}
 		body := p.mergeState.PRBody
 		if body == "" {
