@@ -87,9 +87,12 @@ func TestGetUnpushedCommits_EmptyInputs(t *testing.T) {
 
 func TestGetUnpushedCommits_InvalidRemote(t *testing.T) {
 	tmpDir := t.TempDir()
-	exec.Command("git", "init").Dir = tmpDir
-	exec.Command("git", "init").Run()
-	
+	cmd := exec.Command("git", "init")
+	cmd.Dir = tmpDir
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("git init: %v", err)
+	}
+
 	result := getUnpushedCommits(tmpDir, "nonexistent/branch")
 	if result != nil {
 		t.Errorf("expected nil for invalid remote, got %v", result)
@@ -149,7 +152,7 @@ func TestGetUnpushedCommits_AllPushed(t *testing.T) {
 	run := func(args ...string) {
 		cmd := exec.Command("git", args...)
 		cmd.Dir = tmpDir
-		cmd.Run()
+		_ = cmd.Run()
 	}
 	
 	run("init")
@@ -157,7 +160,7 @@ func TestGetUnpushedCommits_AllPushed(t *testing.T) {
 	run("config", "user.name", "Test")
 	
 	testFile := filepath.Join(tmpDir, "test.txt")
-	os.WriteFile(testFile, []byte("content"), 0644)
+	_ = os.WriteFile(testFile, []byte("content"), 0644)
 	run("add", "test.txt")
 	run("commit", "-m", "commit")
 	
@@ -181,26 +184,26 @@ func TestGetWorktreeCommits_Integration(t *testing.T) {
 		cmd.Dir = tmpDir
 		return cmd.Run()
 	}
-	
-	run("init")
-	run("config", "user.email", "test@test.com")
-	run("config", "user.name", "Test")
-	
+
+	_ = run("init")
+	_ = run("config", "user.email", "test@test.com")
+	_ = run("config", "user.name", "Test")
+
 	// Create main branch with initial commit
 	testFile := filepath.Join(tmpDir, "test.txt")
-	os.WriteFile(testFile, []byte("initial"), 0644)
-	run("add", "test.txt")
-	run("commit", "-m", "initial")
-	run("branch", "-M", "main")
-	
+	_ = os.WriteFile(testFile, []byte("initial"), 0644)
+	_ = run("add", "test.txt")
+	_ = run("commit", "-m", "initial")
+	_ = run("branch", "-M", "main")
+
 	// Create feature branch
-	run("checkout", "-b", "feature")
-	
+	_ = run("checkout", "-b", "feature")
+
 	// Add commits on feature branch
 	for i := 1; i <= 2; i++ {
-		os.WriteFile(testFile, []byte(strings.Repeat("x", i)), 0644)
-		run("add", "test.txt")
-		run("commit", "-m", "feature commit")
+		_ = os.WriteFile(testFile, []byte(strings.Repeat("x", i)), 0644)
+		_ = run("add", "test.txt")
+		_ = run("commit", "-m", "feature commit")
 	}
 	
 	// Test: get commits comparing to main
@@ -227,7 +230,7 @@ func TestGetWorktreeCommits_WithRemoteTracking(t *testing.T) {
 	run := func(args ...string) {
 		cmd := exec.Command("git", args...)
 		cmd.Dir = tmpDir
-		cmd.Run()
+		_ = cmd.Run()
 	}
 	
 	run("init")
@@ -235,19 +238,19 @@ func TestGetWorktreeCommits_WithRemoteTracking(t *testing.T) {
 	run("config", "user.name", "Test")
 	
 	testFile := filepath.Join(tmpDir, "test.txt")
-	os.WriteFile(testFile, []byte("initial"), 0644)
+	_ = os.WriteFile(testFile, []byte("initial"), 0644)
 	run("add", "test.txt")
 	run("commit", "-m", "initial")
 	run("branch", "-M", "main")
-	
+
 	run("checkout", "-b", "feature")
 	
 	// Create commits
-	os.WriteFile(testFile, []byte("x"), 0644)
+	_ = os.WriteFile(testFile, []byte("x"), 0644)
 	run("add", "test.txt")
 	run("commit", "-m", "commit1")
-	
-	os.WriteFile(testFile, []byte("xx"), 0644)
+
+	_ = os.WriteFile(testFile, []byte("xx"), 0644)
 	run("add", "test.txt")
 	run("commit", "-m", "commit2")
 	

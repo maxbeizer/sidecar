@@ -508,7 +508,10 @@ func (p *Plugin) generatePRDescription(wt *Worktree, targetBranch string) tea.Cm
 		// Parse the agent output for PR title and body
 		title, body := parsePRGenerationOutput(stdout.String())
 		if title == "" {
-			title = branch
+			// Use the same branch-name cleaner as buildFallbackPRDescription
+			// rather than the raw branch name (e.g. "shrike/td-2abc-fix-auth-flow"
+			// becomes "shrike td 2abc fix auth flow").
+			title, _ = buildFallbackPRDescription(branch, "", "")
 		}
 		if body == "" {
 			_, body = buildFallbackPRDescription(branch, commitLog, diffStat)
@@ -709,6 +712,10 @@ func getDiffForPR(workdir, baseBranch string) string {
 }
 
 // schedulePRGenerationTick schedules the next animation tick for PR generation progress.
+// Tick-runaway prevention: the handler in Update only re-schedules when
+// mergeState is non-nil AND Step == MergeStepGeneratePR. Once generation
+// completes (step advances) or the workflow is cancelled (mergeState set to nil),
+// the tick message is silently dropped and the chain stops.
 func (p *Plugin) schedulePRGenerationTick(wtName string) tea.Cmd {
 	return tea.Tick(400*time.Millisecond, func(t time.Time) tea.Msg {
 		return prGenerationTickMsg{WorkspaceName: wtName}
@@ -1360,6 +1367,17 @@ func (p *Plugin) yankMergeErrorToClipboard() tea.Cmd {
 		return msg.ShowToast("Copy failed: "+err.Error(), 2*time.Second)
 	}
 	return msg.ShowToast("Copied error to clipboard", 2*time.Second)
+}
+
+// yankPRURLToClipboard copies the PR URL to the system clipboard.
+func (p *Plugin) yankPRURLToClipboard() tea.Cmd {
+	if p.mergeState == nil || p.mergeState.PRURL == "" {
+		return nil
+	}
+	if err := clipboard.WriteAll(p.mergeState.PRURL); err != nil {
+		return msg.ShowToast("Copy failed: "+err.Error(), 2*time.Second)
+	}
+	return msg.ShowToast("Copied PR URL to clipboard", 2*time.Second)
 }
 
 // checkCleanupComplete decrements pending ops counter and advances to done step when all complete.

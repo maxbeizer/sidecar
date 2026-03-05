@@ -13,6 +13,7 @@ import (
 	"github.com/marcus/sidecar/internal/modal"
 	"github.com/marcus/sidecar/internal/mouse"
 	"github.com/marcus/sidecar/internal/plugin"
+	"github.com/marcus/sidecar/internal/projectdir"
 	"github.com/marcus/sidecar/internal/ui"
 	"github.com/marcus/sidecar/internal/plugins/gitstatus"
 	"github.com/marcus/sidecar/internal/state"
@@ -75,6 +76,7 @@ const (
 	mergeTargetActionID    = "merge-target-action"
 	mergeCleanUpButtonID   = "merge-cleanup-btn"
 	mergeSkipButtonID      = "merge-skip-btn"
+	mergePRURLID           = "merge-pr-url"
 
 	// Prompt Picker modal regions
 	regionPromptItem   = "prompt-item"
@@ -398,8 +400,13 @@ func (p *Plugin) Init(ctx *plugin.Context) error {
 	p.stateRestored = false
 
 	// Load shell manifest for persistence (td-f88fdd)
-	manifestPath := filepath.Join(ctx.WorkDir, ".sidecar", "shells.json")
-	p.shellManifest, _ = LoadShellManifest(manifestPath)
+	projDir, err := projectdir.Resolve(ctx.ProjectRoot)
+	if err != nil {
+		p.ctx.Logger.Warn("failed to resolve project dir for manifest", "error", err)
+	} else {
+		manifestPath := filepath.Join(projDir, "shells.json")
+		p.shellManifest, _ = LoadShellManifest(manifestPath)
+	}
 
 	// Stop any previous watcher (important for project switching)
 	if p.shellWatcher != nil {
@@ -538,7 +545,7 @@ func (p *Plugin) saveSelectionState() {
 		}
 	}
 
-	// td-f88fdd: Shell display names now persisted in .sidecar/shells.json manifest
+	// td-f88fdd: Shell display names now persisted in shells.json manifest
 	// Only save selection state (which worktree/shell is selected)
 	if wtState.WorkspaceName != "" || wtState.ShellTmuxName != "" {
 		_ = state.SetWorkspaceState(p.ctx.ProjectRoot, wtState)
@@ -681,6 +688,22 @@ func (p *Plugin) pollSelectedAgentNowIfVisible() tea.Cmd {
 	return p.scheduleAgentPoll(wt.Name, 0)
 }
 
+// pollAllAgentStatusesNow triggers an immediate poll for every worktree that has
+// an active agent. Used when entering kanban view so all statuses are fresh.
+func (p *Plugin) pollAllAgentStatusesNow() tea.Cmd {
+	var cmds []tea.Cmd
+	for _, wt := range p.worktrees {
+		if wt.Agent == nil || p.attachedSession == wt.Name {
+			continue
+		}
+		cmds = append(cmds, p.scheduleAgentPoll(wt.Name, 0))
+	}
+	if len(cmds) == 0 {
+		return nil
+	}
+	return tea.Batch(cmds...)
+}
+
 // removeWorktreeByName removes a worktree from the list by name.
 func (p *Plugin) removeWorktreeByName(name string) {
 	for i, wt := range p.worktrees {
@@ -764,7 +787,7 @@ func (p *Plugin) initCreateModalBase() {
 	// Load prompts from global and project config
 	home, _ := os.UserHomeDir()
 	configDir := filepath.Join(home, ".config", "sidecar")
-	p.createPrompts = LoadPrompts(configDir, p.ctx.WorkDir)
+	p.createPrompts = LoadPrompts(configDir, p.ctx.ProjectRoot)
 	p.createPromptIdx = -1
 	p.promptPicker = nil
 	p.clearPromptPickerModal()

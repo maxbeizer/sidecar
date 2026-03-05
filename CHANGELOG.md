@@ -2,6 +2,109 @@
 
 All notable changes to sidecar are documented here.
 
+## [v0.77.0] - 2026-02-28
+
+### Features
+
+- Add GitHub Copilot CLI adapter for conversations plugin
+
+### Bug Fixes
+
+- Restore mobile sidebar nav visibility (#220)
+- Resolve worktree path from ProjectRoot, not WorkDir (#174) (#218)
+- Fix task title truncation in td view (#215) (#217)
+
+### Documentation
+
+- Worktree setup hooks (#219)
+
+### Developer
+
+- Add pre-commit hooks for gofmt/vet/build (#216)
+
+## [v0.76.0] - 2026-02-27
+
+### Features
+
+- Add Amp agent support for workspaces (#195)
+- Make PR URL clickable and add yank shortcut in merge modal (#164)
+
+### Bug Fixes
+
+- Resolve CI lint and test failures (#214)
+- Remove stale sessionIndex references in opencode adapter tests (#212)
+- Add all sidecar state files to .gitignore on init and startup (#211)
+
+### Dependencies
+
+- Updated td to v0.39.0
+
+## [v0.75.0] - 2026-02-26
+
+### Features
+
+- Open In modal to open projects in IDEs (#200)
+- Centralized project data storage under `~/.local/state/sidecar` with migration (#197)
+- Detect `.todos` file vs directory conflict in onboarding (#206)
+- Agent restart uses chosen agent rather than defaulting to Claude (#192)
+
+### Bug Fixes
+
+- Use standard diagnostic status strings for fsnotify watcher (#158)
+- Hierarchical branch crash, git hangs, and adapter timeouts (#136)
+- Git init bug in test, remove dead kiro code (#148)
+- Opencode sandbox path matching for bare-repo worktrees (#204)
+
+## [v0.74.1] - 2026-02-19
+
+### Bug Fixes
+
+- Fix git locking errors in background operations by using `--no-optional-locks` (PR #186 by @borisvu)
+- Fix tmux agent reconnection type handling (PR #150 by @jacola)
+
+### Added
+
+- MIT LICENSE file (Issue #182)
+
+### Dependencies
+
+- Updated td to v0.38.0 — approval workflow fix
+
+## [v0.73.1] - 2026-02-15
+
+### Bug Fixes
+
+- Shift+Enter and semicolon key fix for Ghostty terminal (PR #171 by @boozedog)
+
+## [v0.73.0] - 2026-02-15
+
+### Features
+
+- Kanban board view — press V in board context for overlay, f to toggle fullscreen
+- 7 status columns: Review, Rework, WIP, Ready, P.Review, Blocked, Closed
+- Per-column independent scrolling with scroll indicators
+- Form autofill/autocomplete for Parent Epic and Dependencies fields
+- InProgress and PendingReview now have distinct categories (previously lumped into Ready)
+
+### Dependencies
+
+- Updated td to v0.37.0
+
+## [v0.72.0] - 2026-02-14
+
+### Dependencies
+
+- Updated td to v0.35.0 — adds GTD-style deferral (td defer, td due, temporal list filters, monitor modal defer/due display)
+
+## [v0.71.1] - 2026-02-10
+
+### Bug Fixes
+
+- Prevent refreshSessions from overwriting concurrent session list updates
+- Improve update error modal UX with actionable info
+- Detect brew upgrade false-positive "already installed" response
+- Add `brew update` before `brew upgrade` in self-update flow
+
 ## [v0.71.0] - 2026-02-09
 
 ### Features

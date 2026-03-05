@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,6 +16,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/marcus/sidecar/internal/features"
+	"github.com/marcus/sidecar/internal/projectdir"
 )
 
 // paneCacheEntry holds cached capture output with timestamp
@@ -366,6 +368,9 @@ func (p *Plugin) StartAgent(wt *Worktree, agentType AgentType) tea.Cmd {
 			return AgentStartedMsg{Epoch: epoch, Err: fmt.Errorf("create session: %w", err)}
 		}
 
+		// Ensure server persists when all sessions are killed
+		ensureTmuxServerConfig()
+
 		// Set history limit for scrollback capture
 		_ = exec.Command("tmux", "set-option", "-t", sessionName, "history-limit",
 			strconv.Itoa(tmuxHistoryLimit)).Run()
@@ -465,7 +470,11 @@ func (p *Plugin) buildAgentCommand(agentType AgentType, wt *Worktree, skipPerms 
 // Returns the command to execute the launcher. This avoids shell escaping issues
 // with complex markdown content (backticks, newlines, quotes, etc).
 func (p *Plugin) writeAgentLauncher(worktreePath string, agentType AgentType, baseCmd, prompt string) (string, error) {
-	launcherFile := filepath.Join(worktreePath, ".sidecar-start.sh")
+	wtDir, err := projectdir.WorktreeDir(p.ctx.ProjectRoot, worktreePath)
+	if err != nil {
+		return "", fmt.Errorf("resolve worktree dir: %w", err)
+	}
+	launcherFile := filepath.Join(wtDir, "start.sh")
 
 	// Build shell profile sourcing command.
 	// This ensures tools like claude (installed via nvm) are in PATH.
@@ -503,6 +512,15 @@ rm -f %q
 %s
 SIDECAR_PROMPT_EOF
 )"
+rm -f %q
+`, shellSetup, baseCmd, prompt, launcherFile)
+	case AgentAmp:
+		// amp requires piping via stdin, does not accept positional args
+		script = fmt.Sprintf(`#!/bin/bash
+%s
+cat <<'SIDECAR_PROMPT_EOF' | %s
+%s
+SIDECAR_PROMPT_EOF
 rm -f %q
 `, shellSetup, baseCmd, prompt, launcherFile)
 	default:
@@ -563,6 +581,9 @@ func (p *Plugin) StartAgentWithOptions(wt *Worktree, agentType AgentType, skipPe
 		if err := cmd.Run(); err != nil {
 			return AgentStartedMsg{Epoch: epoch, Err: fmt.Errorf("create session: %w", err)}
 		}
+
+		// Ensure server persists when all sessions are killed
+		ensureTmuxServerConfig()
 
 		// Set history limit for scrollback capture
 		_ = exec.Command("tmux", "set-option", "-t", sessionName, "history-limit",
@@ -631,6 +652,9 @@ func (p *Plugin) AttachToWorktreeDir(wt *Worktree) tea.Cmd {
 				return TmuxAttachFinishedMsg{WorkspaceName: wt.Name, Err: fmt.Errorf("create session: %w", err)}
 			}
 		}
+
+		// Ensure server persists when all sessions are killed
+		ensureTmuxServerConfig()
 
 		// Track as managed session
 		p.managedSessions[sessionName] = true
@@ -743,7 +767,8 @@ func (p *Plugin) scheduleInteractivePoll(worktreeName string, delay time.Duratio
 // AgentPollUnchangedMsg signals content unchanged, schedule next poll.
 type AgentPollUnchangedMsg struct {
 	WorkspaceName  string
-	CurrentStatus WorktreeStatus // For adaptive polling interval selection
+	CurrentStatus WorktreeStatus // Status including session file re-check
+	WaitingFor    string         // Prompt text if waiting
 	// Cursor position captured atomically (even when content unchanged)
 	CursorRow     int
 	CursorCol     int
@@ -845,38 +870,55 @@ func (p *Plugin) handlePollAgent(worktreeName string) tea.Cmd {
 		output = trimCapturedOutput(output, maxBytes)
 
 		// Use hash-based change detection to skip processing if content unchanged
-		if outputBuf != nil && !outputBuf.Update(output) {
-			// Content unchanged - signal to schedule next poll with delay
-			// Still include cursor position since cursor can move without content changing
+		outputChanged := outputBuf == nil || outputBuf.Update(output)
+
+		// Detect status. Both detectors run; each is authoritative for what it's good at (td-2fca7d):
+		//   - tmux patterns: thinking, done, error (high-signal, session files can't detect these)
+		//   - session files: active vs waiting (reliable, tmux patterns are noisy for this)
+		// Session file detection ALWAYS runs (even when output unchanged) because the agent
+		// may finish while tmux output stays the same (td-2fca7d v8).
+		status := currentStatus
+		waitingFor := ""
+		if !interactiveCapture {
+			if outputChanged {
+				// Tmux pattern detection only when output changes (same output = same patterns).
+				status = detectStatus(output)
+				if status == StatusWaiting {
+					waitingFor = extractPrompt(output)
+				}
+			}
+			// Session file check runs every poll — mtime changes independently of tmux output.
+			// Only override active/waiting; preserve tmux-detected thinking/done/error.
+			if status == StatusActive || status == StatusWaiting {
+				if sessionStatus, ok := detectAgentSessionStatus(agentType, wtPath); ok {
+					prevStatus := status
+					status = sessionStatus
+					if status == StatusWaiting {
+						waitingFor = extractPrompt(output)
+						if waitingFor == "" {
+							waitingFor = "Waiting for input"
+						}
+					} else {
+						waitingFor = ""
+					}
+					slog.Debug("status: session file override", "worktree", worktreeName, "prev", prevStatus, "session", sessionStatus)
+				} else {
+					slog.Debug("status: no session file, using tmux", "worktree", worktreeName, "status", status, "agent", agentType)
+				}
+			}
+		}
+
+		if !outputChanged {
 			return AgentPollUnchangedMsg{
 				WorkspaceName:  worktreeName,
-				CurrentStatus: currentStatus,
+				CurrentStatus: status,
+				WaitingFor:    waitingFor,
 				CursorRow:     cursorRow,
 				CursorCol:     cursorCol,
 				CursorVisible: cursorVisible,
 				HasCursor:     hasCursor,
 				PaneHeight:    paneHeight,
 				PaneWidth:     paneWidth,
-			}
-		}
-
-		// Content changed - detect status (skip during interactive mode to reduce I/O, td-f29f2d)
-		status := currentStatus
-		waitingFor := ""
-		if !interactiveCapture {
-			status = detectStatus(output)
-			if status == StatusWaiting {
-				waitingFor = extractPrompt(output)
-			}
-			// For supported agents: supplement tmux detection with session file analysis
-			// Session files are more reliable for detecting "waiting at prompt" state
-			if status == StatusActive {
-				if sessionStatus, ok := detectAgentSessionStatus(agentType, wtPath); ok {
-					if sessionStatus == StatusWaiting {
-						status = StatusWaiting
-						waitingFor = "Waiting for input"
-					}
-				}
 			}
 		}
 
@@ -1068,31 +1110,34 @@ func tailUTF8Safe(s string, n int) string {
 }
 
 // detectStatus determines agent status from captured output.
-// Optimized to avoid unnecessary string allocations.
+// This is the tmux-based fallback for agents without session file support (td-2fca7d).
+// For supported agents (Claude, Codex, Gemini, OpenCode), session file analysis runs
+// first in handlePollAgent and is more reliable than tmux pattern matching.
 func detectStatus(output string) WorktreeStatus {
 	// Check tail of output for status patterns (avoids splitting entire string)
 	checkText := tailUTF8Safe(output, statusCheckBytes)
 	textLower := strings.ToLower(checkText)
 
-	// Waiting patterns (agent needs user input) - highest priority
-	// Check before thinking since waiting blocks progress
+	// Waiting patterns — only check the last few lines of output (td-2fca7d).
+	// A prompt is only relevant if it's at the bottom of the screen (the agent is
+	// actually waiting right now). Checking 2048 bytes of scrollback history caused
+	// false positives from old prompts and shell prompt characters like "❯".
 	waitingPatterns := []string{
 		"[y/n]",       // Claude Code permission prompt
 		"(y/n)",       // Aider style
 		"allow edit",  // Claude Code file edit
 		"allow bash",  // Claude Code bash command
-		"waiting for", // Generic waiting
 		"press enter", // Continue prompt
 		"continue?",
 		"approve",
 		"confirm",
 		"do you want", // Common prompt
-		"❯",           // Claude Code input prompt (waiting for user)
-		"╰─❯",         // Claude Code prompt with tree line decoration
 	}
 
+	lastLines := extractLastNLines(checkText, 5)
+	lastLinesLower := strings.ToLower(lastLines)
 	for _, pattern := range waitingPatterns {
-		if strings.Contains(textLower, pattern) {
+		if strings.Contains(lastLinesLower, pattern) {
 			return StatusWaiting
 		}
 	}
@@ -1154,6 +1199,34 @@ func detectStatus(output string) WorktreeStatus {
 
 	// Default: active if we have output
 	return StatusActive
+}
+
+// extractLastNLines returns the last n non-empty lines of text.
+// Used by detectStatus to restrict waiting pattern matching to the bottom of the terminal.
+func extractLastNLines(text string, n int) string {
+	// Work backwards from the end to find the last n lines
+	end := len(text)
+	// Skip trailing whitespace/newlines
+	for end > 0 && (text[end-1] == '\n' || text[end-1] == '\r' || text[end-1] == ' ') {
+		end--
+	}
+	if end == 0 {
+		return ""
+	}
+
+	linesFound := 0
+	pos := end
+	for pos > 0 && linesFound < n {
+		pos--
+		if text[pos] == '\n' {
+			linesFound++
+		}
+	}
+	// If we stopped at a newline, skip past it
+	if pos > 0 || (pos == 0 && text[0] == '\n') {
+		pos++
+	}
+	return text[pos:end]
 }
 
 // extractPrompt finds the prompt text from output.
@@ -1319,9 +1392,9 @@ func (p *Plugin) detectOrphanedWorktrees() {
 		// Skip main worktree - can't attach agents to it anyway
 		if wt.IsMain {
 			wt.IsOrphaned = false
-			// Clean up any stale .sidecar-agent file from main worktree
+			// Clean up any stale agent file from main worktree
 			if wt.ChosenAgentType != "" && wt.ChosenAgentType != AgentNone {
-				_ = os.Remove(filepath.Join(wt.Path, sidecarAgentFile))
+				_ = saveAgentType(p.ctx.ProjectRoot, wt.Path, AgentNone)
 				wt.ChosenAgentType = ""
 			}
 			continue
@@ -1379,8 +1452,12 @@ func (p *Plugin) reconnectAgents() tea.Cmd {
 
 			// Create agent record
 			paneID := getPaneID(session)
+			agentType := wt.ChosenAgentType
+			if agentType == "" || agentType == AgentNone {
+				agentType = AgentClaude // Fallback if no .sidecar-agent file
+			}
 			agent := &Agent{
-				Type:        AgentClaude, // Default, will be detected from output
+				Type:        agentType,
 				TmuxSession: session,
 				TmuxPane:    paneID,     // Capture pane ID for interactive mode
 				StartedAt:   time.Now(), // Unknown actual start

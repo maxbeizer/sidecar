@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
@@ -22,6 +23,11 @@ const (
 	shellSessionPrefix = "sidecar-sh-" // Distinct from worktree prefix "sidecar-ws-"
 )
 
+// launchedInsideTmux is true if sidecar was started from within an existing
+// tmux session (i.e. TMUX env var was set at process start). This is captured
+// at package init time, before main() unsets TMUX for nested session support.
+var launchedInsideTmux = os.Getenv("TMUX") != ""
+
 // tmuxInstalled caches whether tmux is available in PATH.
 // Checked once and cached to avoid repeated exec calls.
 var (
@@ -30,7 +36,19 @@ var (
 
 	tmuxPrefixOnce   sync.Once
 	tmuxPrefixCached string
+
+	tmuxServerConfigOnce sync.Once
 )
+
+// ensureTmuxServerConfig sets server-level options on the tmux server.
+// Called once per process before the first session is created.
+// Sets exit-empty off so the server persists even when all sessions are killed,
+// preventing the server from dying between sidecar operations.
+func ensureTmuxServerConfig() {
+	tmuxServerConfigOnce.Do(func() {
+		_ = exec.Command("tmux", "set-option", "-s", "exit-empty", "off").Run()
+	})
+}
 
 // isTmuxInstalled returns true if tmux is available in PATH.
 // Result is cached after first check.
@@ -68,6 +86,18 @@ func getTmuxPrefix() string {
 		tmuxPrefixCached = tmuxNotationToHuman(parts[1])
 	})
 	return tmuxPrefixCached
+}
+
+// getTmuxDetachHint returns the key sequence hint for detaching from a nested
+// tmux session. When sidecar was launched inside an existing tmux session, the
+// user needs to press the prefix twice (once to reach the inner session) before
+// pressing d. Otherwise a single prefix + d suffices.
+func getTmuxDetachHint() string {
+	prefix := getTmuxPrefix()
+	if launchedInsideTmux {
+		return prefix + " " + prefix + " d"
+	}
+	return prefix + " d"
 }
 
 // tmuxNotationToHuman converts tmux key notation to human-readable format.
@@ -520,6 +550,9 @@ func (p *Plugin) createNewShell(customName string) tea.Cmd {
 			}
 		}
 
+		// Ensure server persists when all sessions are killed
+		ensureTmuxServerConfig()
+
 		// Capture pane ID for interactive mode support
 		paneID := getPaneID(sessionName)
 
@@ -578,6 +611,9 @@ func (p *Plugin) createShellWithAgent() tea.Cmd {
 			}
 		}
 
+		// Ensure server persists when all sessions are killed
+		ensureTmuxServerConfig()
+
 		// Capture pane ID for interactive mode support
 		paneID := getPaneID(sessionName)
 
@@ -621,6 +657,9 @@ func (p *Plugin) recreateOrphanedShell(idx int) tea.Cmd {
 				Err:         fmt.Errorf("recreate shell session: %w", err),
 			}
 		}
+
+		// Ensure server persists when all sessions are killed
+		ensureTmuxServerConfig()
 
 		tty.SetWindowSizeManual(sessionName)
 
@@ -728,6 +767,7 @@ func (p *Plugin) ensureShellAndAttachByIndex(idx int) tea.Cmd {
 					Err:         fmt.Errorf("recreate shell session: %w", err),
 				}
 			}
+			ensureTmuxServerConfig()
 			tty.SetWindowSizeManual(sessionName)
 			// Capture pane ID for interactive mode support
 			paneID := getPaneID(sessionName)

@@ -439,6 +439,55 @@ func TestBuildFallbackPRDescription(t *testing.T) {
 	}
 }
 
+func TestParsePRGenerationOutput_EmptyTitleFallback(t *testing.T) {
+	// When agent output has PR_TITLE marker but no actual title text,
+	// parsePRGenerationOutput returns "" so the caller uses the cleaned branch name.
+	tests := []struct {
+		name      string
+		output    string
+		wantTitle string
+	}{
+		{
+			name:      "empty title after marker",
+			output:    "PR_TITLE: \nPR_BODY:\nSome body text.",
+			wantTitle: "",
+		},
+		{
+			name:      "whitespace-only title",
+			output:    "PR_TITLE:    \nPR_BODY:\nBody.",
+			wantTitle: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotTitle, _ := parsePRGenerationOutput(tt.output)
+			if gotTitle != tt.wantTitle {
+				t.Errorf("parsePRGenerationOutput() title = %q, want %q", gotTitle, tt.wantTitle)
+			}
+		})
+	}
+
+	// Verify that buildFallbackPRDescription cleans branch names properly
+	// when used as a title fallback (matches the logic in generatePRDescription).
+	branchTests := []struct {
+		branch    string
+		wantTitle string
+	}{
+		{"shrike/td-2abc-fix-auth-flow", "shrike td 2abc fix auth flow"},
+		{"feature/my_branch-name", "feature my branch name"},
+		{"simple", "simple"},
+	}
+	for _, tt := range branchTests {
+		t.Run("fallback_"+tt.branch, func(t *testing.T) {
+			gotTitle, _ := buildFallbackPRDescription(tt.branch, "", "")
+			if gotTitle != tt.wantTitle {
+				t.Errorf("buildFallbackPRDescription(%q) title = %q, want %q", tt.branch, gotTitle, tt.wantTitle)
+			}
+		})
+	}
+}
+
 func TestPrintModeArgsEntries(t *testing.T) {
 	// Verify all PrintModeArgs entries have corresponding AgentCommands
 	for agentType, args := range PrintModeArgs {
