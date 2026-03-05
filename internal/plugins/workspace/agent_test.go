@@ -276,7 +276,7 @@ func TestResolveAgentBaseCommand_UTF8BOMStripped(t *testing.T) {
 	}
 }
 
-func TestResolveAgentBaseCommand_ReplacementCharFallsBack(t *testing.T) {
+func TestResolveAgentBaseCommand_ReplacementCharStripped(t *testing.T) {
 	tmpDir := t.TempDir()
 	overridePath := filepath.Join(tmpDir, sidecarAgentStartFile)
 	if err := os.WriteFile(overridePath, []byte("opencode\ufffd"), 0644); err != nil {
@@ -1184,5 +1184,101 @@ func TestExtractLastNLines(t *testing.T) {
 				t.Errorf("extractLastNLines(%q, %d) = %q, want %q", tt.text, tt.n, result, tt.expected)
 			}
 		})
+	}
+}
+
+// TestResolveConfigAgentStart exercises the wildcard fallback chain.
+// Precedence: exact agentType key → "*" wildcard → "default" key.
+func TestResolveConfigAgentStart_WildcardFallbackChain(t *testing.T) {
+	tests := []struct {
+		name      string
+		agentStart map[string]string
+		agentType  AgentType
+		want       string
+	}{
+		{
+			name:      "exact match wins",
+			agentStart: map[string]string{"claude": "my-claude", "*": "wildcard-agent", "default": "default-agent"},
+			agentType:  AgentClaude,
+			want:       "my-claude",
+		},
+		{
+			name:      "miss on exact falls through to wildcard",
+			agentStart: map[string]string{"*": "wildcard-agent", "default": "default-agent"},
+			agentType:  AgentCodex,
+			want:       "wildcard-agent",
+		},
+		{
+			name:      "miss on exact and wildcard falls through to default",
+			agentStart: map[string]string{"default": "default-agent"},
+			agentType:  AgentCodex,
+			want:       "default-agent",
+		},
+		{
+			name:      "all miss returns empty",
+			agentStart: map[string]string{"gemini": "gemini-agent"},
+			agentType:  AgentCodex,
+			want:       "",
+		},
+		{
+			name:      "nil map returns empty",
+			agentStart: nil,
+			agentType:  AgentClaude,
+			want:       "",
+		},
+		{
+			name:      "empty map returns empty",
+			agentStart: map[string]string{},
+			agentType:  AgentClaude,
+			want:       "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := resolveConfigAgentStart(tt.agentStart, tt.agentType)
+			if got != tt.want {
+				t.Errorf("resolveConfigAgentStart() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestResolveAgentBaseCommand_ThreeLayerPrecedence verifies the full precedence chain:
+// .sidecar-agent-start file > config agentStart > AgentCommands default.
+func TestResolveAgentBaseCommand_ThreeLayerPrecedence(t *testing.T) {
+	tmpDir := t.TempDir()
+	overridePath := tmpDir + "/" + sidecarAgentStartFile
+
+	cfg := config.Default()
+	cfg.Plugins.Workspace.AgentStart = map[string]string{
+		string(AgentClaude): "config-claude --fast",
+	}
+	p := &Plugin{
+		ctx: &plugin.Context{
+			WorkDir: tmpDir,
+			Config:  cfg,
+		},
+	}
+
+	// Layer 3: no file, no config key → AgentCommands default
+	got := p.resolveAgentBaseCommand(tmpDir, AgentCodex)
+	if got != "codex" {
+		t.Errorf("layer3 (default) = %q, want %q", got, "codex")
+	}
+
+	// Layer 2: config agentStart key present → use it
+	got = p.resolveAgentBaseCommand(tmpDir, AgentClaude)
+	if got != "config-claude --fast" {
+		t.Errorf("layer2 (config) = %q, want %q", got, "config-claude --fast")
+	}
+
+	// Layer 1: .sidecar-agent-start file → always wins
+	if err := os.WriteFile(overridePath, []byte("file-claude --override"), 0644); err != nil {
+		t.Fatalf("write override file: %v", err)
+	}
+	got = p.resolveAgentBaseCommand(tmpDir, AgentClaude)
+	if got != "file-claude --override" {
+		t.Errorf("layer1 (file) = %q, want %q", got, "file-claude --override")
 	}
 }

@@ -280,7 +280,10 @@ func applyEnvOverrides(cfg *Config) {
 		return
 	}
 
-	if v, ok := os.LookupEnv(envWorkspaceDefaultAgentType); ok {
+	// SIDECAR_WORKSPACE_DEFAULT_AGENT_TYPE takes precedence over SIDECAR_DEFAULT_AGENT_TYPE,
+	// but only when it is set to a non-blank value. A blank value means "unset" so we fall
+	// through to the lower-priority env var rather than silently dropping it.
+	if v, ok := os.LookupEnv(envWorkspaceDefaultAgentType); ok && strings.TrimSpace(v) != "" {
 		cfg.Plugins.Workspace.DefaultAgentType = strings.TrimSpace(v)
 		return
 	}

@@ -665,7 +665,11 @@ func (p *Plugin) startAgentInShell(tmuxName string, agentType AgentType, skipPer
 			workDir = p.ctx.WorkDir
 		}
 
-		// Get the base command for this agent family, allowing worktree-level override.
+		// Get the base command for this agent family, allowing workspace-level override.
+		// Note: shell sessions pass p.ctx.WorkDir (the main workspace directory) as the
+		// search path for .sidecar-agent-start, unlike worktree sessions which pass wt.Path
+		// (the worktree-specific directory). This means .sidecar-agent-start in a worktree
+		// does NOT affect shell session agent commands — only the workspace root file does.
 		baseCmd := p.resolveAgentBaseCommand(workDir, agentType)
 		if strings.TrimSpace(baseCmd) == "" {
 			return ShellAgentErrorMsg{

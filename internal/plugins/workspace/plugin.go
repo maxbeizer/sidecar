@@ -707,7 +707,8 @@ func (p *Plugin) removeWorktreeByName(name string) {
 	}
 }
 
-func isCreateDefaultAgent(agentType AgentType) bool {
+// isKnownAgentType reports whether agentType is a recognized, non-empty agent type.
+func isKnownAgentType(agentType AgentType) bool {
 	if agentType == "" {
 		return false
 	}
@@ -722,7 +723,7 @@ func isCreateDefaultAgent(agentType AgentType) bool {
 func (p *Plugin) getConfigDefaultAgentType() AgentType {
 	if p != nil && p.ctx != nil && p.ctx.Config != nil {
 		configAgent := AgentType(strings.TrimSpace(p.ctx.Config.Plugins.Workspace.DefaultAgentType))
-		if isCreateDefaultAgent(configAgent) {
+		if isKnownAgentType(configAgent) {
 			return configAgent
 		}
 	}
@@ -734,7 +735,7 @@ func (p *Plugin) getConfigDefaultAgentType() AgentType {
 func (p *Plugin) resolveWorktreeAgentType(wt *Worktree) AgentType {
 	if wt != nil {
 		fileAgent := loadAgentType(wt.Path)
-		if isCreateDefaultAgent(fileAgent) {
+		if isKnownAgentType(fileAgent) {
 			return fileAgent
 		}
 	}
@@ -745,14 +746,10 @@ func (p *Plugin) resolveWorktreeAgentType(wt *Worktree) AgentType {
 // .sidecar-agent in the current workspace is treated equivalently to config defaultAgentType.
 func (p *Plugin) getDefaultCreateAgentType() AgentType {
 	if p != nil && p.ctx != nil {
-		agentPath := filepath.Join(p.ctx.WorkDir, sidecarAgentFile)
-		if content, err := os.ReadFile(agentPath); err == nil {
-			fileAgent := AgentType(strings.TrimSpace(string(content)))
-			if isCreateDefaultAgent(fileAgent) {
-				return fileAgent
-			}
+		fileAgent := loadAgentType(p.ctx.WorkDir)
+		if isKnownAgentType(fileAgent) {
+			return fileAgent
 		}
-
 		return p.getConfigDefaultAgentType()
 	}
 	return p.getConfigDefaultAgentType()

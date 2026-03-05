@@ -314,3 +314,60 @@ func TestLoadFrom_WorkspaceAgentStartLegacyStringBackwardCompat(t *testing.T) {
 		t.Errorf("AgentStart[*] = %q, want %q", got, "custom-agent --legacy")
 	}
 }
+
+func TestApplyEnvOverrides_WorkspaceVarTakesPrecedence(t *testing.T) {
+	t.Setenv(envWorkspaceDefaultAgentType, "opencode")
+	t.Setenv(envDefaultAgentType, "gemini")
+
+	cfg := Default()
+	applyEnvOverrides(cfg)
+
+	if cfg.Plugins.Workspace.DefaultAgentType != "opencode" {
+		t.Errorf("DefaultAgentType = %q, want %q", cfg.Plugins.Workspace.DefaultAgentType, "opencode")
+	}
+}
+
+func TestApplyEnvOverrides_FallsThruWhenWorkspaceVarBlank(t *testing.T) {
+	// When SIDECAR_WORKSPACE_DEFAULT_AGENT_TYPE is set but blank, we should
+	// NOT short-circuit — SIDECAR_DEFAULT_AGENT_TYPE must still be honoured.
+	t.Setenv(envWorkspaceDefaultAgentType, "   ")
+	t.Setenv(envDefaultAgentType, "gemini")
+
+	cfg := Default()
+	applyEnvOverrides(cfg)
+
+	if cfg.Plugins.Workspace.DefaultAgentType != "gemini" {
+		t.Errorf("DefaultAgentType = %q, want %q (blank workspace var should fall through)", cfg.Plugins.Workspace.DefaultAgentType, "gemini")
+	}
+}
+
+func TestApplyEnvOverrides_OnlyDefaultVar(t *testing.T) {
+	t.Setenv(envDefaultAgentType, "codex")
+
+	cfg := Default()
+	applyEnvOverrides(cfg)
+
+	if cfg.Plugins.Workspace.DefaultAgentType != "codex" {
+		t.Errorf("DefaultAgentType = %q, want %q", cfg.Plugins.Workspace.DefaultAgentType, "codex")
+	}
+}
+
+func TestApplyEnvOverrides_NeitherVarSet(t *testing.T) {
+	cfg := Default()
+	cfg.Plugins.Workspace.DefaultAgentType = "original"
+
+	// Ensure neither env var is set
+	t.Setenv(envWorkspaceDefaultAgentType, "")
+	if err := os.Unsetenv(envWorkspaceDefaultAgentType); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Unsetenv(envDefaultAgentType); err != nil {
+		t.Fatal(err)
+	}
+
+	applyEnvOverrides(cfg)
+
+	if cfg.Plugins.Workspace.DefaultAgentType != "original" {
+		t.Errorf("DefaultAgentType = %q, want %q (should be unchanged)", cfg.Plugins.Workspace.DefaultAgentType, "original")
+	}
+}
