@@ -66,6 +66,8 @@ TD shortcuts are dynamically exported from TD itself via `ExportBindings()` and 
 | `\` | Toggle sidebar visibility |
 | `h` / `left` | Focus left pane |
 | `l` / `right` | Focus right pane |
+| `+` | Grow sidebar width |
+| `-` | Shrink sidebar width |
 
 ## Git Status Plugin
 

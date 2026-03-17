@@ -51,6 +51,8 @@ func DefaultBindings() []Binding {
 		{Key: "k", Command: "cursor-up", Context: "git-status"},
 		{Key: "tab", Command: "switch-pane", Context: "git-status"},
 		{Key: "shift+tab", Command: "switch-pane", Context: "git-status"},
+		{Key: "l", Command: "focus-right", Context: "git-status"},
+		{Key: "right", Command: "focus-right", Context: "git-status"},
 		{Key: "s", Command: "stage-file", Context: "git-status"},
 		{Key: "u", Command: "unstage-file", Context: "git-status"},
 		{Key: "S", Command: "stage-all", Context: "git-status"},
@@ -74,6 +76,8 @@ func DefaultBindings() []Binding {
 		{Key: "Y", Command: "yank-path", Context: "git-status"},
 		{Key: "D", Command: "discard-changes", Context: "git-status"},
 		{Key: "\\", Command: "toggle-sidebar", Context: "git-status"},
+		{Key: "+", Command: "resize-pane-grow", Context: "git-status"},
+		{Key: "-", Command: "resize-pane-shrink", Context: "git-status"},
 
 		// Git status commits context (sidebar)
 		{Key: "j", Command: "cursor-down", Context: "git-status-commits"},
@@ -94,6 +98,8 @@ func DefaultBindings() []Binding {
 		{Key: "P", Command: "push", Context: "git-status-commits"},
 		{Key: "L", Command: "pull", Context: "git-status-commits"},
 		{Key: "\\", Command: "toggle-sidebar", Context: "git-status-commits"},
+		{Key: "+", Command: "resize-pane-grow", Context: "git-status-commits"},
+		{Key: "-", Command: "resize-pane-shrink", Context: "git-status-commits"},
 
 		// Git history search modal context
 		{Key: "enter", Command: "select", Context: "git-history-search"},
@@ -120,6 +126,8 @@ func DefaultBindings() []Binding {
 		{Key: "v", Command: "toggle-diff-view", Context: "git-status-diff"},
 		{Key: "\\", Command: "toggle-sidebar", Context: "git-status-diff"},
 		{Key: "w", Command: "toggle-wrap", Context: "git-status-diff"},
+		{Key: "+", Command: "resize-pane-grow", Context: "git-status-diff"},
+		{Key: "-", Command: "resize-pane-shrink", Context: "git-status-diff"},
 
 		// Git commit preview context
 		{Key: "j", Command: "scroll-down", Context: "git-commit-preview"},
@@ -131,6 +139,8 @@ func DefaultBindings() []Binding {
 		{Key: "o", Command: "open-in-github", Context: "git-commit-preview"},
 		{Key: "b", Command: "open-in-file-browser", Context: "git-commit-preview"},
 		{Key: "\\", Command: "toggle-sidebar", Context: "git-commit-preview"},
+		{Key: "+", Command: "resize-pane-grow", Context: "git-commit-preview"},
+		{Key: "-", Command: "resize-pane-shrink", Context: "git-commit-preview"},
 
 		// Git diff context (full screen)
 		{Key: "esc", Command: "close-diff", Context: "git-diff"},
@@ -222,6 +232,8 @@ func DefaultBindings() []Binding {
 		{Key: "Y", Command: "yank-resume", Context: "conversations-sidebar"},
 		{Key: "C", Command: "toggle-category", Context: "conversations-sidebar"},
 		{Key: "R", Command: "resume-in-workspace", Context: "conversations-sidebar"},
+		{Key: "+", Command: "resize-pane-grow", Context: "conversations-sidebar"},
+		{Key: "-", Command: "resize-pane-shrink", Context: "conversations-sidebar"},
 
 		// Conversations main context (two-pane mode, right pane focused)
 		{Key: "tab", Command: "switch-pane", Context: "conversations-main"},
@@ -240,10 +252,14 @@ func DefaultBindings() []Binding {
 		{Key: "y", Command: "yank-details", Context: "conversations-main"},
 		{Key: "Y", Command: "yank-resume", Context: "conversations-main"},
 		{Key: "R", Command: "resume-in-workspace", Context: "conversations-main"},
+		{Key: "+", Command: "resize-pane-grow", Context: "conversations-main"},
+		{Key: "-", Command: "resize-pane-shrink", Context: "conversations-main"},
 
 		// File browser tree context
 		{Key: "tab", Command: "switch-pane", Context: "file-browser-tree"},
 		{Key: "shift+tab", Command: "switch-pane", Context: "file-browser-tree"},
+		{Key: "l", Command: "focus-right", Context: "file-browser-tree"},
+		{Key: "right", Command: "focus-right", Context: "file-browser-tree"},
 		{Key: "/", Command: "search", Context: "file-browser-tree"},
 		{Key: "ctrl+p", Command: "quick-open", Context: "file-browser-tree"},
 		{Key: "f", Command: "project-search", Context: "file-browser-tree"},
@@ -268,6 +284,8 @@ func DefaultBindings() []Binding {
 		{Key: "B", Command: "blame", Context: "file-browser-tree"},
 		{Key: "\\", Command: "toggle-sidebar", Context: "file-browser-tree"},
 		{Key: "H", Command: "toggle-ignored", Context: "file-browser-tree"},
+		{Key: "+", Command: "resize-pane-grow", Context: "file-browser-tree"},
+		{Key: "-", Command: "resize-pane-shrink", Context: "file-browser-tree"},
 
 		// File browser preview context
 		{Key: "tab", Command: "switch-pane", Context: "file-browser-preview"},
@@ -292,6 +310,8 @@ func DefaultBindings() []Binding {
 		{Key: "Y", Command: "yank-path", Context: "file-browser-preview"},
 		{Key: "\\", Command: "toggle-sidebar", Context: "file-browser-preview"},
 		{Key: "w", Command: "toggle-wrap", Context: "file-browser-preview"},
+		{Key: "+", Command: "resize-pane-grow", Context: "file-browser-preview"},
+		{Key: "-", Command: "resize-pane-shrink", Context: "file-browser-preview"},
 
 		// File browser tree search context
 		{Key: "esc", Command: "cancel", Context: "file-browser-search"},
@@ -365,6 +385,8 @@ func DefaultBindings() []Binding {
 		{Key: "[", Command: "prev-tab", Context: "workspace-list"},
 		{Key: "]", Command: "next-tab", Context: "workspace-list"},
 		{Key: "F", Command: "fetch-pr", Context: "workspace-list"},
+		{Key: "+", Command: "resize-pane-grow", Context: "workspace-list"},
+		{Key: "-", Command: "resize-pane-shrink", Context: "workspace-list"},
 
 		// Workspace fetch PR context
 		{Key: "esc", Command: "cancel", Context: "workspace-fetch-pr"},
@@ -390,6 +412,8 @@ func DefaultBindings() []Binding {
 		{Key: "k", Command: "scroll-up", Context: "workspace-preview"},
 		{Key: "ctrl+d", Command: "page-down", Context: "workspace-preview"},
 		{Key: "ctrl+u", Command: "page-up", Context: "workspace-preview"},
+		{Key: "+", Command: "resize-pane-grow", Context: "workspace-preview"},
+		{Key: "-", Command: "resize-pane-shrink", Context: "workspace-preview"},
 
 		// Workspace merge error context
 		{Key: "esc", Command: "dismiss-merge-error", Context: "workspace-merge-error"},

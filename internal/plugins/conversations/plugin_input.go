@@ -8,6 +8,7 @@ import (
 	"github.com/marcus/sidecar/internal/adapter"
 	appmsg "github.com/marcus/sidecar/internal/msg"
 	"github.com/marcus/sidecar/internal/plugin"
+	"github.com/marcus/sidecar/internal/state"
 )
 
 // Update methods for handling key events in various views
@@ -124,6 +125,28 @@ func (p *Plugin) updateSessions(msg tea.KeyMsg) (plugin.Plugin, tea.Cmd) {
 		p.toggleSidebar()
 		if !p.sidebarVisible {
 			return p, appmsg.ShowToast("Sidebar hidden (\\ to restore)", 2*time.Second)
+		}
+
+	case "+":
+		// Grow sidebar width
+		if p.sidebarVisible {
+			available := p.width - dividerWidth
+			maxWidth := available - 40
+			p.sidebarWidth += 3
+			if p.sidebarWidth > maxWidth {
+				p.sidebarWidth = maxWidth
+			}
+			_ = state.SetConversationsSideWidth(p.sidebarWidth)
+		}
+
+	case "-":
+		// Shrink sidebar width
+		if p.sidebarVisible {
+			p.sidebarWidth -= 3
+			if p.sidebarWidth < 25 {
+				p.sidebarWidth = 25
+			}
+			_ = state.SetConversationsSideWidth(p.sidebarWidth)
 		}
 
 	case "l", "right":
@@ -424,6 +447,30 @@ func (p *Plugin) updateMessages(msg tea.KeyMsg) (plugin.Plugin, tea.Cmd) {
 			p.activePane = PaneSidebar
 		} else {
 			p.activePane = PaneSidebar
+		}
+		return p, nil
+
+	case "+":
+		// Grow sidebar width (from main pane)
+		if p.sidebarVisible {
+			available := p.width - dividerWidth
+			maxWidth := available - 40
+			p.sidebarWidth += 3
+			if p.sidebarWidth > maxWidth {
+				p.sidebarWidth = maxWidth
+			}
+			_ = state.SetConversationsSideWidth(p.sidebarWidth)
+		}
+		return p, nil
+
+	case "-":
+		// Shrink sidebar width (from main pane)
+		if p.sidebarVisible {
+			p.sidebarWidth -= 3
+			if p.sidebarWidth < 25 {
+				p.sidebarWidth = 25
+			}
+			_ = state.SetConversationsSideWidth(p.sidebarWidth)
 		}
 		return p, nil
 

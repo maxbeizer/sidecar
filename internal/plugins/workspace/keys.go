@@ -690,6 +690,34 @@ func (p *Plugin) handleListKeys(msg tea.KeyMsg) tea.Cmd {
 		if p.activePane == PanePreview {
 			p.activePane = PaneSidebar
 		}
+	case "+":
+		// Grow sidebar width
+		if p.sidebarVisible {
+			p.sidebarWidth += 3
+			if p.sidebarWidth > 60 {
+				p.sidebarWidth = 60
+			}
+			_ = state.SetWorkspaceSidebarWidth(p.sidebarWidth)
+			if p.viewMode == ViewModeInteractive && p.interactiveState != nil && p.interactiveState.Active {
+				return tea.Batch(p.resizeInteractivePaneCmd(), p.pollInteractivePaneImmediate())
+			}
+			return p.resizeSelectedPaneCmd()
+		}
+
+	case "-":
+		// Shrink sidebar width
+		if p.sidebarVisible {
+			p.sidebarWidth -= 3
+			if p.sidebarWidth < 20 {
+				p.sidebarWidth = 20
+			}
+			_ = state.SetWorkspaceSidebarWidth(p.sidebarWidth)
+			if p.viewMode == ViewModeInteractive && p.interactiveState != nil && p.interactiveState.Active {
+				return tea.Batch(p.resizeInteractivePaneCmd(), p.pollInteractivePaneImmediate())
+			}
+			return p.resizeSelectedPaneCmd()
+		}
+
 	case "\\":
 		p.toggleSidebar()
 		if p.viewMode == ViewModeInteractive {

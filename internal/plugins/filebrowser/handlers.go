@@ -370,6 +370,31 @@ func (p *Plugin) handleTreeKey(key string) (plugin.Plugin, tea.Cmd) {
 			p.activePane = PanePreview
 		}
 
+	case "+":
+		// Grow tree pane width
+		if p.treeVisible {
+			available := p.width - dividerWidth
+			maxWidth := available - 40
+			p.treeWidth += 3
+			if p.treeWidth > maxWidth {
+				p.treeWidth = maxWidth
+			}
+			p.previewWidth = available - p.treeWidth
+			_ = state.SetFileBrowserTreeWidth(p.treeWidth)
+		}
+
+	case "-":
+		// Shrink tree pane width
+		if p.treeVisible {
+			p.treeWidth -= 3
+			if p.treeWidth < 20 {
+				p.treeWidth = 20
+			}
+			available := p.width - dividerWidth
+			p.previewWidth = available - p.treeWidth
+			_ = state.SetFileBrowserTreeWidth(p.treeWidth)
+		}
+
 	case "\\":
 		// Toggle tree pane visibility
 		p.treeVisible = !p.treeVisible
@@ -459,6 +484,31 @@ func (p *Plugin) handlePreviewKey(key string) (plugin.Plugin, tea.Cmd) {
 		p.previewScroll -= visibleHeight
 		if p.previewScroll < 0 {
 			p.previewScroll = 0
+		}
+
+	case "+":
+		// Grow tree pane width (from preview pane)
+		if p.treeVisible {
+			available := p.width - dividerWidth
+			maxWidth := available - 40
+			p.treeWidth += 3
+			if p.treeWidth > maxWidth {
+				p.treeWidth = maxWidth
+			}
+			p.previewWidth = available - p.treeWidth
+			_ = state.SetFileBrowserTreeWidth(p.treeWidth)
+		}
+
+	case "-":
+		// Shrink tree pane width (from preview pane)
+		if p.treeVisible {
+			p.treeWidth -= 3
+			if p.treeWidth < 20 {
+				p.treeWidth = 20
+			}
+			available := p.width - dividerWidth
+			p.previewWidth = available - p.treeWidth
+			_ = state.SetFileBrowserTreeWidth(p.treeWidth)
 		}
 
 	case "h", "left", "esc":
